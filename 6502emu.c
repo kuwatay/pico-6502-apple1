@@ -38,7 +38,7 @@ uint8_t via_latch = 0;
 // #define VIA_BASE_ADDRESS UINT16_C(0xFF90) // Don this address interferes with Krusader
 // #define VIA_BASE_ADDRESS UINT16_C(0x0200)
 // DON TRY THE FOLLOWING
-#define VIA_BASE_ADDRESS UINT16_C(0x7000)
+#define VIA_BASE_ADDRESS UINT16_C(0xB000)
 
 // If this is active, then an overclock will be applied
 #define OVERCLOCK
@@ -48,17 +48,13 @@ uint8_t via_latch = 0;
 // Delay startup by so many seconds
 #define START_DELAY 6
 // The address at which to put your ROM file
-#define ROM_START 0x8000
+#define ROM_START 0xE000
 // Size of your ROM
-#define ROM_SIZE 0x8000
+#define ROM_SIZE 0x2000
 // Your rom file in C array format
-// #define ROM_FILE "forth.h"
-// #define ROM_FILE "wozmon.h"
-#define ROM_FILE "krusader.h"
+#define ROM_FILE "8KBasic_Monitor.h"
 // Variable in which your rom data is stored
-// #define ROM_VAR taliforth_pico_bin
-// #define ROM_VAR wozmon
-#define ROM_VAR krusader
+#define ROM_VAR data
 
 #ifdef VIA_BASE_ADDRESS
 m6522_t via;
@@ -118,17 +114,29 @@ void via_update()
 uint8_t read6502(uint16_t address)
 {
 #ifndef TESTING
-    // if (address == 0xf004) { // Don, update to work easily with Krusader
-    if (address == 0xe004)
-    {
-        int16_t ch = getchar_timeout_us(100);
-        if (ch == PICO_ERROR_TIMEOUT)
-        {
-            return 0;
-        }
-        return (uint8_t)ch & 0xFF;
-#ifdef VIA_BASE_ADDRESS
+  // Apple1 PIA control : $D010-$D013
+  if ((address & 0xf010) == 0xd010) { // make sure A4=High
+    switch (address & 0x3) {
+    case 0: // read keyboard (0xd010)
+      mem[0xd011] = 0;
+      return mem[0xd010]; // need to set MSB
+    case 1: // read status (0xd011)
+      {
+	int16_t ch = getchar_timeout_us(100);
+	if (ch == PICO_ERROR_TIMEOUT) {
+	  mem[0xd010] = 0x0;
+	  return 0x00; // no key data (MSB=0)
+	}
+	mem[0xd010] = (uint8_t)ch | 0x80; // store data at $D010, w/set MSB
+	return 0x80; // key data exist (MSB=1)
+      }
+    case 2:
+      return mem[0xd012]; // return the byte last displayed
+    case 3:
+      return mem[0xd013]; // ignored
     }
+  } // end PIA access
+#ifdef VIA_BASE_ADDRESS
     // else if ((address & 0xFF00) == VIA_BASE_ADDRESS)
     else if ((address & 0xFFF0) == VIA_BASE_ADDRESS) 
         {
@@ -224,8 +232,8 @@ uint8_t read6502(uint16_t address)
         // old_ticks > 0 ? old_ticks-- : 0;
         return vdata;
         //}
-#endif
         }
+#endif
 #endif
     return mem[address];
 }
@@ -239,12 +247,23 @@ void write6502(uint16_t address, uint8_t value)
         printf("next test is %d\n", value);
     }
 #else
-    // if (address == 0xf001) { // Don, update to work easily with Krusader
-    if (address == 0xe001)
-    {
-        printf("%c", value);
+    // Apple1 PIA control : $D010-$D013
+    if ((address & 0xf010) == 0xd010) { // make sure A4=High
+      switch (address & 0x3) {
+      case 2: 	// write 0xd012
+	{
+	  printf("%c", value & 0x7F);
+	  mem[0xd012] = value & 0x7F; // MSB reset, as we already put the char in display
+	}
+	break;
+      case 0:
+      case 1:
+      case 3:
+	break;
+      // do nothing
+      }
+    } // end PIA access
 #ifdef VIA_BASE_ADDRESS
-    }
     else if ((address & 0xFFF0) == VIA_BASE_ADDRESS)
     // else if ((address & 0xDFF0) == VIA_BASE_ADDRESS)
     {
@@ -296,8 +315,8 @@ void write6502(uint16_t address, uint8_t value)
 
         via_update();
         // old_ticks > 0 ? old_ticks-- : 0;
-#endif
     }
+#endif
     else
     {
         mem[address] = value;
