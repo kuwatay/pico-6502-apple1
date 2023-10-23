@@ -122,7 +122,7 @@ uint8_t read6502(uint16_t address)
       return mem[0xd010]; // need to set MSB
     case 1: // read status (0xd011)
       {
-	int16_t ch = getchar_timeout_us(100);
+	int16_t ch = getchar_timeout_us(0); // was 100us
 	if (ch == PICO_ERROR_TIMEOUT) {
 	  mem[0xd010] = 0x0;
 	  return 0x00; // no key data (MSB=0)
